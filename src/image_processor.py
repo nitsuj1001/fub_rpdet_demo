@@ -9,39 +9,50 @@ from cv_bridge import CvBridge, CvBridgeError
 
 bridge = CvBridge()
 
+IMG_PATH = "/media/schoko/BULK/BA/rosbag_extract/thielallee_hella/"
+EXTRACT_ORIGINAL = True
+EXTRACT_GRAY = True
+EXTRACT_MASK = False
+
 def process_image(data):
-    rospy.loginfo(rospy.get_caller_id() + "H:%s | W:%s | Header:%s | Encoding: %s", data.height, data.width, data.header, data.encoding)
-    rospy.loginfo(rospy.get_caller_id() + "Data: step (row length in bytes) - %s", data.step)
+    rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Header:%s | Encoding: %s", data.height, data.width, data.header, data.encoding)
+    rospy.loginfo(rospy.get_caller_id() + " Data: step (row length in bytes) - %s", data.step)
 
     try:
         height, width = data.height, data.width        
-        # Konvertiere ROS-Bildnachricht in OpenCV-Bild
-        img = bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
-        
-        # Bild verarbeiten oder speichern
-        cv2.imwrite("result.jpg", img)
-        rospy.loginfo("Image saved successfully as result.jpg")
-        rospy.loginfo("Image Shape: %s", img.shape)
-        rospy.loginfo(img[0])
+        # Konvertiere ROS-Message in OpenCV-Bild
+        img = bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")                    
 
+        # Speichere original Bild
+        if (EXTRACT_ORIGINAL):            
+            path_orig = IMG_PATH + str(data.header.seq) + "_original.jpg"
+            cv2.imwrite(path_orig, img)
+            rospy.loginfo("Original image [%s] saved successfully with shape: %s", path_orig, img.shape)
+        
         # Speichere graues Bild
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        cv2.imwrite("result_gray.jpg", img_gray)
-        rospy.loginfo(img_gray.shape)
+        if (EXTRACT_GRAY):
+            path_gray = IMG_PATH + str(data.header.seq) + "_gray.jpg"
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            cv2.imwrite(path_gray, img_gray)
+            rospy.loginfo("Gray image [%s] saved successfully with shape: %s", path_gray, img_gray.shape)
         
-        # Schneide Halbkreis aus
-        mask = np.zeros((height, width), dtype=np.uint8)
+        # Speichere maskiertes Bild
+        if (EXTRACT_MASK):
+            # Schneide Halbkreis aus
+            mask = np.zeros((height, width), dtype=np.uint8)
 
-        center = (width // 2, height)
-        radius = int(width * 0.5)
-        cv2.circle(mask, center, radius, 255, -1)
+            center = (width // 2, height)
+            radius = int(width * 0.5)
+            cv2.circle(mask, center, radius, 255, -1)
 
-        mask_inverted = cv2.bitwise_not(mask)
+            mask_inverted = cv2.bitwise_not(mask)
 
-        output_image = img_gray.copy()
-        output_image[mask_inverted == 255] = [0]
-        
-        cv2.imwrite('result_masked.jpg', output_image)
+            masked_image = img_gray.copy()
+            masked_image[mask_inverted == 255] = [0]
+                        
+            path_masked = IMG_PATH + str(data.header.seq) + "_masked.jpg"
+            cv2.imwrite(path_masked, masked_image)
+            rospy.loginfo("Masked image saved successfully with shape: %s", path_masked, masked_image.shape)
                       
     except CvBridgeError as e:
         rospy.logerr(f"Failed to convert image: {e}")  
