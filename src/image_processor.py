@@ -15,8 +15,7 @@ EXTRACT_GRAY = True
 EXTRACT_MASK = False
 
 def process_image(data):
-    rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Header:%s | Encoding: %s", data.height, data.width, data.header, data.encoding)
-    rospy.loginfo(rospy.get_caller_id() + " Data: step (row length in bytes) - %s", data.step)
+    rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Seq:%s | Encoding:%s", data.height, data.width, data.header.seq, data.encoding)    
 
     try:
         height, width = data.height, data.width        
