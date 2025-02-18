@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import rospy 
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
@@ -9,35 +10,35 @@ from cv_bridge import CvBridge, CvBridgeError
 
 bridge = CvBridge()
 
-IMG_PATH = "/media/schoko/BULK/BA/rosbag_extract/thielallee_hella/"
+IMG_PATH = "/media/schoko/BULK/BA/rosbag_extract/biglap3/"
 EXTRACT_ORIGINAL = True
-EXTRACT_GRAY = True
+EXTRACT_GRAY = False
 EXTRACT_MASK = False
+
+os.makedirs(IMG_PATH, exist_ok=True)
 
 def process_image(data):
     rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Seq:%s | Encoding:%s", data.height, data.width, data.header.seq, data.encoding)    
 
     try:
-        height, width = data.height, data.width        
-        # Konvertiere ROS-Message in OpenCV-Bild
+        height, width = data.height, data.width 
+        # ROS Image to OpenCV Image       
         img = bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")                    
 
-        # Speichere original Bild
+        # save original image
         if (EXTRACT_ORIGINAL):            
             path_orig = IMG_PATH + str(data.header.seq) + "_original.jpg"
             cv2.imwrite(path_orig, img)
             rospy.loginfo("Original image [%s] saved successfully with shape: %s", path_orig, img.shape)
         
-        # Speichere graues Bild
+        # save gray image
         if (EXTRACT_GRAY):
             path_gray = IMG_PATH + str(data.header.seq) + "_gray.jpg"
             img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             cv2.imwrite(path_gray, img_gray)
             rospy.loginfo("Gray image [%s] saved successfully with shape: %s", path_gray, img_gray.shape)
         
-        # Speichere maskiertes Bild
         if (EXTRACT_MASK):
-            # Schneide Halbkreis aus
             mask = np.zeros((height, width), dtype=np.uint8)
 
             center = (width // 2, height)
