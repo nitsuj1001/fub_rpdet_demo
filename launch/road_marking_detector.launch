@@ -1,0 +1,11 @@
+<launch>
+    <!-- Set debug logging -->
+    <param name="/rospy/logging_level" value="debug"/>
+
+    <!-- Launch the road marking detector node -->
+    <node name="road_marking_detector" pkg="fub_rpdet_demo" type="road_marking_detector.py" output="screen">
+    </node>
+
+    <!-- Launch RViz with configuration -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find fub_rpdet_demo)/rviz/road_markings.rviz"/>
+</launch>

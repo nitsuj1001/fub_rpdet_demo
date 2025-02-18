@@ -162,6 +162,7 @@ catkin_install_python(PROGRAMS
   src/talker.py
   src/listener.py
   src/image_processor.py
+  src/road_marking_detector.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
