@@ -2,8 +2,9 @@
     <!-- Set debug logging -->
     <param name="/rospy/logging_level" value="debug"/>
 
-    <!-- Launch the road marking detector node -->
+    <!-- Launch the road marking detector node with correct Python path -->
     <node name="road_marking_detector" pkg="fub_rpdet_demo" type="road_marking_detector.py" output="screen">
+        <env name="PYTHONPATH" value="$(env HOME)/venvs/fub_rpdet/lib/python3.8/site-packages:$(env PYTHONPATH)"/>
     </node>
 
     <!-- Launch RViz with configuration -->

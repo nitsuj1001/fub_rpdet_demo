@@ -8,6 +8,7 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import Point, Pose
 import tf2_ros
 import tf2_geometry_msgs
+from ultralytics import YOLO
 
 class RoadMarkingDetector:
     def __init__(self):
@@ -22,6 +23,7 @@ class RoadMarkingDetector:
         self.yc = 472.811
         self.kappas = [-1.453264, -3.146470]
         self.lambdas = [5.616413, 3.929874]
+        self.model = YOLO("/home/schoko/projects/ba_rp_detection/rp_detector/yolo_roadpictogram_detection/settings_set_3/train5/weights/epoch50.pt")
         
         # Initialize camera matrix with loaded parameters
         self.camera_matrix = np.array([
@@ -143,11 +145,11 @@ class RoadMarkingDetector:
             
             rospy.logdebug("Successfully converted image with shape: %s", cv_image.shape)
             
-            # Run YOLO detection here
-            # detections = run_yolo(cv_image)  # Replace with your YOLO implementation
+            # Run YOLO detection here            
+            detections = self.model.predict(source=cv_image, imgsz=640, conf=0.1)  # Replace with your YOLO implementation
             # For testing, let's create a dummy detection
-            dummy_detection = [100, 100, 200, 200]  # [x1, y1, x2, y2]
-            detections = [dummy_detection]
+            #dummy_detection = [100, 100, 200, 200]  # [x1, y1, x2, y2]
+            #detections = [dummy_detection]
             rospy.logdebug("Found %d detections", len(detections))
             
             marker_array = MarkerArray()
