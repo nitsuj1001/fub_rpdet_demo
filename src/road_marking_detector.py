@@ -104,31 +104,39 @@ class RoadMarkingDetector:
             rospy.logerr("Error in projection: %s", e)
             return None
 
-    def create_ground_marker(self, position, marker_id, frame_id):
-        if position is None:
-            return None
-            
+    def create_ground_marker(self, point, marker_id, frame_id):
         marker = Marker()
-        marker.header.frame_id = 'base_link'  # Changed to base_link
+        marker.header.frame_id = frame_id
         marker.header.stamp = rospy.Time.now()
+        marker.ns = "road_markings"
         marker.id = marker_id
-        marker.type = Marker.CUBE
+        marker.type = Marker.SPHERE
         marker.action = Marker.ADD
         
-        marker.pose.position.x = position[0]
-        marker.pose.position.y = position[1]
-        marker.pose.position.z = position[2]
+        # Set position
+        marker.pose.position.x = point[0]
+        marker.pose.position.y = point[1]
+        marker.pose.position.z = 0.0
         
-        # Set size based on detection type
-        marker.scale.x = 1.0  # width
-        marker.scale.y = 1.0  # length
-        marker.scale.z = 0.1  # height (thin)
+        # Set proper quaternion orientation (identity rotation)
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
         
-        # Set color (yellow for road markings)
+        # Set marker size
+        marker.scale.x = 0.2
+        marker.scale.y = 0.2
+        marker.scale.z = 0.2
+        
+        # Set marker color (red)
         marker.color.r = 1.0
-        marker.color.g = 1.0
+        marker.color.g = 0.0
         marker.color.b = 0.0
-        marker.color.a = 0.8
+        marker.color.a = 1.0
+        
+        # Set marker lifetime
+        marker.lifetime = rospy.Duration(0.5)  # markers disappear after 0.5 seconds
         
         return marker
 
@@ -157,11 +165,18 @@ class RoadMarkingDetector:
             #dummy_detection = [100, 100, 200, 200]  # [x1, y1, x2, y2]
             #detections = [dummy_detection]
             rospy.logdebug("Found %d detections", len(results))
-            rospy.logdebug(results)
             
             marker_array = MarkerArray()
             
             result = results[0]
+
+            # Clear previous markers
+            deletion_marker = Marker()
+            deletion_marker.header.frame_id = "base_link"
+            deletion_marker.header.stamp = rospy.Time.now()
+            deletion_marker.ns = "road_markings"
+            deletion_marker.action = Marker.DELETEALL
+            marker_array.markers.append(deletion_marker)
 
             # Extract boxes from results
             if hasattr(result, 'boxes') and len(result.boxes) > 0:
