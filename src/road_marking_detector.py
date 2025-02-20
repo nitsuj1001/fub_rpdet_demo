@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/schoko/venvs/fub_rpdet/bin/python3
 import rospy
 import cv2
 import numpy as np
@@ -8,6 +8,12 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import Point, Pose
 import tf2_ros
 import tf2_geometry_msgs
+
+import sys
+#sys.path.append()
+print("Python-Pfad:", sys.executable)  # Sollte auf die venv zeigen
+print("PYTHONPATH:", sys.path)
+
 from ultralytics import YOLO
 
 class RoadMarkingDetector:
@@ -146,24 +152,36 @@ class RoadMarkingDetector:
             rospy.logdebug("Successfully converted image with shape: %s", cv_image.shape)
             
             # Run YOLO detection here            
-            detections = self.model.predict(source=cv_image, imgsz=640, conf=0.1)  # Replace with your YOLO implementation
+            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1)  # Replace with your YOLO implementation
             # For testing, let's create a dummy detection
             #dummy_detection = [100, 100, 200, 200]  # [x1, y1, x2, y2]
             #detections = [dummy_detection]
-            rospy.logdebug("Found %d detections", len(detections))
+            rospy.logdebug("Found %d detections", len(results))
+            rospy.logdebug(results)
             
             marker_array = MarkerArray()
             
-            for i, bbox in enumerate(detections):
-                ground_point = self.project_to_ground(bbox, 
-                                                    cv_image.shape[0],
-                                                    cv_image.shape[1])
+            result = results[0]
+
+            # Extract boxes from results
+            if hasattr(result, 'boxes') and len(result.boxes) > 0:
+                boxes = result.boxes
+                for i, box in enumerate(boxes):
+                    # Get box coordinates
+                    coords = box.xyxy[0].cpu().numpy()  # Get bbox coordinates
+                    bbox = [int(coord) for coord in coords]
+                    
+                    ground_point = self.project_to_ground(bbox,
+                                                        cv_image.shape[0],
+                                                        cv_image.shape[1])
+                    
+                    if ground_point is not None:
+                        marker = self.create_ground_marker(ground_point, i, 'base_link')
+                        if marker is not None:
+                            marker_array.markers.append(marker)
+            else:
+                rospy.logdebug("No detections found")
                 
-                if ground_point is not None:
-                    marker = self.create_ground_marker(ground_point, i, 'base_link')
-                    if marker is not None:
-                        marker_array.markers.append(marker)
-            
             rospy.logdebug("Publishing %d markers", len(marker_array.markers))
             self.marker_pub.publish(marker_array)
             
