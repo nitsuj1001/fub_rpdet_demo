@@ -17,18 +17,33 @@ EXTRACT_MASK = False
 
 os.makedirs(IMG_PATH, exist_ok=True)
 
-# Add start time variable
+# Add tracking set for saved images
+saved_timestamps = set()
 start_time = None
+last_duration = float('-inf')  # Track last duration to detect bag restart
 
 def process_image(data):
-    global start_time
+    global start_time, last_duration, saved_timestamps
     
-    # Initialize start time with first message
+    # Calculate duration
     if start_time is None:
         start_time = data.header.stamp.to_sec()
     
-    # Calculate duration from start
     duration = data.header.stamp.to_sec() - start_time
+    
+    # Detect bag restart (duration jumps back to a smaller value)
+    if duration < last_duration:
+        rospy.loginfo("Detected bag restart - skipping duplicate images")
+        return
+    
+    last_duration = duration
+    
+    # Check if we've already processed this timestamp
+    if duration in saved_timestamps:
+        rospy.logdebug("Skipping duplicate image at duration %.3f", duration)
+        return
+        
+    saved_timestamps.add(duration)
     
     rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Seq:%s | Encoding:%s | Duration:%s", 
                   data.height, data.width, data.header.seq, data.encoding, duration)    
