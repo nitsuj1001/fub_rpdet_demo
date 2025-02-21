@@ -10,30 +10,42 @@ from cv_bridge import CvBridge, CvBridgeError
 
 bridge = CvBridge()
 
-IMG_PATH = "/media/schoko/BULK/BA/rosbag_extract/biglap3/"
+IMG_PATH = "/media/schoko/BULK/BA/rosbag_extract/biglap3_2/"
 EXTRACT_ORIGINAL = True
 EXTRACT_GRAY = False
 EXTRACT_MASK = False
 
 os.makedirs(IMG_PATH, exist_ok=True)
 
+# Add start time variable
+start_time = None
+
 def process_image(data):
-    rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Seq:%s | Encoding:%s", data.height, data.width, data.header.seq, data.encoding)    
+    global start_time
+    
+    # Initialize start time with first message
+    if start_time is None:
+        start_time = data.header.stamp.to_sec()
+    
+    # Calculate duration from start
+    duration = data.header.stamp.to_sec() - start_time
+    
+    rospy.loginfo(rospy.get_caller_id() + " H:%s | W:%s | Seq:%s | Encoding:%s | Duration:%s", 
+                  data.height, data.width, data.header.seq, data.encoding, duration)    
 
     try:
         height, width = data.height, data.width 
-        # ROS Image to OpenCV Image       
+        
+        # Use duration instead of timestamp for filenames
         img = bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")                    
 
-        # save original image
         if (EXTRACT_ORIGINAL):            
-            path_orig = IMG_PATH + str(data.header.seq) + "_original.jpg"
+            path_orig = IMG_PATH + f"{data.header.seq}_d{duration:.3f}_original.jpg"
             cv2.imwrite(path_orig, img)
             rospy.loginfo("Original image [%s] saved successfully with shape: %s", path_orig, img.shape)
         
-        # save gray image
         if (EXTRACT_GRAY):
-            path_gray = IMG_PATH + str(data.header.seq) + "_gray.jpg"
+            path_gray = IMG_PATH + f"{data.header.seq}_d{duration:.3f}_gray.jpg"
             img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             cv2.imwrite(path_gray, img_gray)
             rospy.loginfo("Gray image [%s] saved successfully with shape: %s", path_gray, img_gray.shape)
@@ -50,7 +62,7 @@ def process_image(data):
             masked_image = img_gray.copy()
             masked_image[mask_inverted == 255] = [0]
                         
-            path_masked = IMG_PATH + str(data.header.seq) + "_masked.jpg"
+            path_masked = IMG_PATH + f"{data.header.seq}_d{duration:.3f}_masked.jpg"
             cv2.imwrite(path_masked, masked_image)
             rospy.loginfo("Masked image saved successfully with shape: %s", path_masked, masked_image.shape)
                       

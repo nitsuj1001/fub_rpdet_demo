@@ -9,27 +9,22 @@ from geometry_msgs.msg import Point, Pose
 import tf2_ros
 import tf2_geometry_msgs
 
-import sys
-#sys.path.append()
-print("Python-Pfad:", sys.executable)  # Sollte auf die venv zeigen
-print("PYTHONPATH:", sys.path)
-
 from ultralytics import YOLO
 
 class RoadMarkingDetector:
-    def __init__(self):
+    def __init__(self, model_path):
         self.bridge = CvBridge()
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         
-        # Load camera parameters from file
+        # Load camera parameters
         self.fx = 1525.34
         self.fy = 1525.34
         self.xc = 913.403
         self.yc = 472.811
         self.kappas = [-1.453264, -3.146470]
         self.lambdas = [5.616413, 3.929874]
-        self.model = YOLO("/home/schoko/projects/ba_rp_detection/rp_detector/yolo_roadpictogram_detection/settings_set_3/train5/weights/epoch50.pt")
+        self.model = YOLO(model_path)
         
         # Initialize camera matrix with loaded parameters
         self.camera_matrix = np.array([
@@ -207,7 +202,7 @@ def main():
     # Enable debug logging
     rospy.init_node('road_marking_detector', log_level=rospy.DEBUG)
     rospy.loginfo("Starting Road Marking Detector node")
-    detector = RoadMarkingDetector()
+    RoadMarkingDetector("/home/schoko/projects/ba_rp_detection/rp_detector/yolo_roadpictogram_detection/settings_set_3/train5/weights/epoch50.pt")
     rospy.spin()
 
 if __name__ == '__main__':
