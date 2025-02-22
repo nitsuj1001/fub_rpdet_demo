@@ -36,7 +36,8 @@ class RoadMarkingDetector:
         rospy.loginfo("Initialized camera matrix with parameters from file")
         
         # Publishers
-        self.marker_pub = rospy.Publisher('road_markings', MarkerArray, queue_size=10)
+        self.marker_pub = rospy.Publisher('road_markings', MarkerArray, queue_size=10)        
+        self.image_pub = rospy.Publisher('road_markings/detection_image', Image, queue_size=10)
         
         # Subscribers
         rospy.Subscriber('sensors/hella/image', Image, self.image_callback)
@@ -161,6 +162,9 @@ class RoadMarkingDetector:
             #detections = [dummy_detection]
             rospy.logdebug("Found %d detections", len(results))
             
+            # Create a copy of the image for visualization
+            visualization_image = cv_image.copy()
+            
             marker_array = MarkerArray()
             
             result = results[0]
@@ -181,6 +185,21 @@ class RoadMarkingDetector:
                     coords = box.xyxy[0].cpu().numpy()  # Get bbox coordinates
                     bbox = [int(coord) for coord in coords]
                     
+                    # Draw bounding box on the visualization image
+                    cv2.rectangle(visualization_image, 
+                                (bbox[0], bbox[1]), 
+                                (bbox[2], bbox[3]), 
+                                (0, 255, 0), 2)  # Green color, thickness=2
+                    
+                    # Add confidence score if available
+                    if hasattr(box, 'conf'):
+                        conf = float(box.conf[0])
+                        cv2.putText(visualization_image, 
+                                  f"{conf:.2f}", 
+                                  (bbox[0], bbox[1] - 10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 
+                                  0.5, (0, 255, 0), 2)
+                    
                     ground_point = self.project_to_ground(bbox,
                                                         cv_image.shape[0],
                                                         cv_image.shape[1])
@@ -189,10 +208,15 @@ class RoadMarkingDetector:
                         marker = self.create_ground_marker(ground_point, i, 'base_link')
                         if marker is not None:
                             marker_array.markers.append(marker)
-            else:
-                rospy.logdebug("No detections found")
-                
-            rospy.logdebug("Publishing %d markers", len(marker_array.markers))
+            
+            # Convert the visualization image back to ROS message and publish
+            try:
+                vis_msg = self.bridge.cv2_to_imgmsg(visualization_image, encoding='rgb8')
+                vis_msg.header = msg.header  # Keep the original header
+                self.image_pub.publish(vis_msg)
+            except Exception as e:
+                rospy.logerr(f"Error publishing visualization image: {e}")
+            
             self.marker_pub.publish(marker_array)
             
         except Exception as e:
