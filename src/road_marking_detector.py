@@ -142,10 +142,9 @@ class RoadMarkingDetector:
             return
 
         try:
-            # Debug the incoming image encoding
             rospy.logdebug("Incoming image encoding: %s", msg.encoding)
             
-            # Convert ROS Image to OpenCV image - changed conversion
+            # Zurück zur ursprünglichen Konvertierung
             if msg.encoding == '8UC3':
                 cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
                 # Convert from BGR to RGB if needed
@@ -156,17 +155,13 @@ class RoadMarkingDetector:
             rospy.logdebug("Successfully converted image with shape: %s", cv_image.shape)
             
             # Run YOLO detection here            
-            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1)  # Replace with your YOLO implementation
-            # For testing, let's create a dummy detection
-            #dummy_detection = [100, 100, 200, 200]  # [x1, y1, x2, y2]
-            #detections = [dummy_detection]
+            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1)
             rospy.logdebug("Found %d detections", len(results))
             
-            # Create a copy of the image for visualization
-            visualization_image = cv_image.copy()
+            # Erstelle eine Kopie für die Visualisierung und konvertiere zu BGR
+            visualization_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
             
             marker_array = MarkerArray()
-            
             result = results[0]
 
             # Clear previous markers
@@ -181,17 +176,15 @@ class RoadMarkingDetector:
             if hasattr(result, 'boxes') and len(result.boxes) > 0:
                 boxes = result.boxes
                 for i, box in enumerate(boxes):
-                    # Get box coordinates
-                    coords = box.xyxy[0].cpu().numpy()  # Get bbox coordinates
+                    coords = box.xyxy[0].cpu().numpy()
                     bbox = [int(coord) for coord in coords]
                     
-                    # Draw bounding box on the visualization image
+                    # Zeichne auf das BGR Bild
                     cv2.rectangle(visualization_image, 
                                 (bbox[0], bbox[1]), 
                                 (bbox[2], bbox[3]), 
-                                (0, 255, 0), 2)  # Green color, thickness=2
+                                (0, 255, 0), 2)
                     
-                    # Add confidence score if available
                     if hasattr(box, 'conf'):
                         conf = float(box.conf[0])
                         cv2.putText(visualization_image, 
@@ -209,10 +202,10 @@ class RoadMarkingDetector:
                         if marker is not None:
                             marker_array.markers.append(marker)
             
-            # Convert the visualization image back to ROS message and publish
+            # Publish the visualization image (in BGR format)
             try:
-                vis_msg = self.bridge.cv2_to_imgmsg(visualization_image, encoding='rgb8')
-                vis_msg.header = msg.header  # Keep the original header
+                vis_msg = self.bridge.cv2_to_imgmsg(visualization_image, encoding='bgr8')
+                vis_msg.header = msg.header
                 self.image_pub.publish(vis_msg)
             except Exception as e:
                 rospy.logerr(f"Error publishing visualization image: {e}")
