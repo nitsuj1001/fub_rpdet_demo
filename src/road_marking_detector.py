@@ -5,9 +5,10 @@ import numpy as np
 from sensor_msgs.msg import Image, CameraInfo
 from visualization_msgs.msg import Marker, MarkerArray
 from cv_bridge import CvBridge
-from geometry_msgs.msg import Point, Pose
+from geometry_msgs.msg import Point, Pose, PointStamped, Vector3Stamped
 import tf2_ros
 import tf2_geometry_msgs
+import math
 
 from ultralytics import YOLO
 
@@ -75,66 +76,85 @@ class RoadMarkingDetector:
         ])
 
     def project_point_to_ground(self, x, y):
-        """Projects a single pixel coordinate (x, y) onto the ground plane (z=0)."""
+        """Projects a single pixel coordinate (x, y) onto the ground plane (z=0) using tf2."""
         try:
-            trans = self.tf_buffer.lookup_transform(
-                'base_link',
-                'hella_camera',
-                rospy.Time(0)
-            )
-
-            # Homogeneous coordinate
+            # Create a point in camera frame
             point_img = np.array([[x], [y], [1.0]])
             
             # Convert to normalized camera coordinates
-            point_cam = np.linalg.inv(self.camera_matrix) @ point_img
-
-            # Camera position in base_link frame
-            cam_pos = np.array([
-                trans.transform.translation.x,
-                trans.transform.translation.y,
-                trans.transform.translation.z
+            point_cam_normalized = np.linalg.inv(self.camera_matrix) @ point_img
+            
+            # Create a ray direction vector in camera frame
+            ray_dir_cam = np.array([point_cam_normalized[0,0], point_cam_normalized[1,0], 1.0])
+            ray_dir_cam = ray_dir_cam / np.linalg.norm(ray_dir_cam)
+            
+            # Create a Vector3Stamped for the ray direction in camera frame
+            ray_vec_camera = Vector3Stamped()
+            ray_vec_camera.header.frame_id = 'hella_camera'
+            ray_vec_camera.header.stamp = rospy.Time(0)
+            ray_vec_camera.vector.x = ray_dir_cam[0]
+            ray_vec_camera.vector.y = ray_dir_cam[1]
+            ray_vec_camera.vector.z = ray_dir_cam[2]
+            
+            # Transform the ray direction vector from camera frame to base_link frame
+            try:
+                ray_vec_base = self.tf_buffer.transform(ray_vec_camera, 'base_link', rospy.Duration(0.1))
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+                rospy.logerr("TF Error transforming ray vector: %s", e)
+                return None
+            
+            # Extract the transformed direction vector
+            ray_dir_base = np.array([
+                ray_vec_base.vector.x,
+                ray_vec_base.vector.y,
+                ray_vec_base.vector.z
             ])
-
-            # In camera frame, the ray direction should point forward (+z in camera frame)
-            ray_direction_cam = np.array([point_cam[0,0], point_cam[1,0], 1.0])
-            ray_direction_cam = ray_direction_cam / np.linalg.norm(ray_direction_cam)
             
-            # Get rotation matrix
-            rotation_matrix = self.quaternion_to_rotation_matrix(trans.transform.rotation)
-            
-            # Transform ray direction to base_link frame
-            # Note: We need to invert the rotation because we're going from camera to base_link
-            ray_direction = rotation_matrix.T @ ray_direction_cam
-
-            # Ground plane parameters (z=0)
-            ground_normal = np.array([0, 0, 1])
-            ground_point = np.array([0, 0, 0])
-
-            # Calculate intersection with ground plane
-            denominator = np.dot(ray_direction, ground_normal)
-            if abs(denominator) < 1e-6:
-                rospy.logwarn("Ray is parallel to ground plane")
+            # Get camera position in base_link frame
+            try:
+                trans = self.tf_buffer.lookup_transform('base_link', 'hella_camera', rospy.Time(0))
+                camera_pos = np.array([
+                    trans.transform.translation.x,
+                    trans.transform.translation.y,
+                    trans.transform.translation.z
+                ])
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+                rospy.logerr("TF Error looking up camera position: %s", e)
                 return None
-
-            d = -np.dot(cam_pos, ground_normal) / denominator
             
-            if d < 0:
-                rospy.logwarn("Ray points away from ground plane")
+            rospy.logdebug(f"Camera pos: {camera_pos}")
+            rospy.logdebug(f"Ray dir (camera): {ray_dir_cam}")
+            rospy.logdebug(f"Ray dir (base): {ray_dir_base}")
+            
+            # Calculate intersection with ground plane (z=0)
+            # If ray z-component is very close to 0 or positive, it won't intersect ground
+            if abs(ray_dir_base[2]) < 1e-6:
+                rospy.logwarn(f"Ray is parallel to ground plane: z={ray_dir_base[2]}")
                 return None
-
-            intersection_point = cam_pos + d * ray_direction
-
-            # Debug output
-            rospy.logdebug(f"Camera position: {cam_pos}")
-            rospy.logdebug(f"Ray direction (camera frame): {ray_direction_cam}")
-            rospy.logdebug(f"Ray direction (base frame): {ray_direction}")
-            rospy.logdebug(f"Intersection point: {intersection_point}")
+                
+            if ray_dir_base[2] > 0:
+                rospy.logwarn(f"Ray is pointing away from ground plane: z={ray_dir_base[2]}")
+                # For debugging, try inverting the z direction to see if that helps
+                ray_dir_base[2] = -ray_dir_base[2]
+                rospy.logwarn(f"Inverting ray direction to try to get intersection")
             
-            return intersection_point.tolist()
-
+            # t is the parameter where the ray intersects the ground plane
+            t = -camera_pos[2] / ray_dir_base[2]
+            
+            # Compute the intersection point
+            intersection = [
+                camera_pos[0] + t * ray_dir_base[0],
+                camera_pos[1] + t * ray_dir_base[1],
+                0.0  # z=0 by definition
+            ]
+            
+            rospy.logdebug(f"Intersection point: {intersection}, t={t}")
+            return intersection
+            
         except Exception as e:
-            rospy.logerr("Error in project_point_to_ground: %s", e)
+            rospy.logerr(f"Error in project_point_to_ground: {e}")
+            import traceback
+            rospy.logerr(traceback.format_exc())
             return None
 
     def create_ground_bbox_marker(self, corners_3d, marker_id, frame_id):
