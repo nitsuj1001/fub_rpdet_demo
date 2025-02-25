@@ -188,10 +188,14 @@ class RoadMarkingDetector:
                                 (bbox[2], bbox[3]), 
                                 (0, 255, 0), 2)
                     
-                    if hasattr(box, 'conf'):
+                    # Get class name and confidence
+                    if hasattr(box, 'cls'):
+                        class_id = int(box.cls[0])
+                        class_name = self.model.names[class_id]
                         conf = float(box.conf[0])
+                        label = f"{class_name} {conf:.2f}"
                         cv2.putText(visualization_image, 
-                                  f"{conf:.2f}", 
+                                  label,
                                   (bbox[0], bbox[1] - 10),
                                   cv2.FONT_HERSHEY_SIMPLEX, 
                                   0.5, (0, 255, 0), 2)
