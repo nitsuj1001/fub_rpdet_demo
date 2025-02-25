@@ -17,7 +17,7 @@ class RoadMarkingDetector:
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         
-        # Load camera parameters
+        # Camera parameters
         self.fx = 1525.34
         self.fy = 1525.34
         self.xc = 913.403
@@ -26,23 +26,23 @@ class RoadMarkingDetector:
         self.lambdas = [5.616413, 3.929874]
         self.model = YOLO(model_path)
         
-        # Initialize camera matrix with loaded parameters
+        # Initialize camera matrix with parameters
         self.camera_matrix = np.array([
             [self.fx, 0, self.xc],
             [0, self.fy, self.yc],
             [0, 0, 1]
         ])
         
-        rospy.loginfo("Initialized camera matrix with parameters from file")
+        rospy.loginfo("Initialized camera matrix with parameters")
         
         # Publishers
-        self.marker_pub = rospy.Publisher('road_markings', MarkerArray, queue_size=10)        
+        self.marker_pub = rospy.Publisher('road_markings', MarkerArray, queue_size=10)
         self.image_pub = rospy.Publisher('road_markings/detection_image', Image, queue_size=10)
         
         # Subscribers
         rospy.Subscriber('sensors/hella/image', Image, self.image_callback)
         rospy.Subscriber('sensors/hella/camera_info', CameraInfo, self.camera_info_callback)
-
+        
     def camera_info_callback(self, msg):
         if self.camera_matrix is None:
             self.camera_matrix = np.array(msg.K).reshape(3, 3)
@@ -50,19 +50,16 @@ class RoadMarkingDetector:
             rospy.logdebug("Camera matrix initialized: \n%s", self.camera_matrix)
             rospy.logdebug("Distortion coefficients: %s", self.dist_coeffs)
 
-    def project_to_ground(self, bbox, image_height, image_width):
+    def project_point_to_ground(self, x, y):
+        """Projects a single pixel coordinate (x, y) onto the ground plane (z=0)."""
         try:
-            # Get bottom center of bounding box in image coordinates
-            x_center = (bbox[0] + bbox[2]) / 2
-            y_bottom = bbox[3]
-            
-            # Create homogeneous point
-            point_img = np.array([[x_center], [y_bottom], [1.0]])
+            # Homogeneous coordinate
+            point_img = np.array([[x], [y], [1.0]])
             
             # Convert to normalized camera coordinates
             point_cam = np.linalg.inv(self.camera_matrix) @ point_img
-            
-            # Get transform from camera to base_link
+
+            # Attempt to get the transform from camera to base_link
             try:
                 trans = self.tf_buffer.lookup_transform(
                     'base_link',
@@ -73,67 +70,61 @@ class RoadMarkingDetector:
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
                 rospy.logerr("TF lookup failed: %s", e)
                 return None
-            
-            # Create ray from camera origin through image point
+
+            # Ray direction from camera origin
             ray_direction = np.array([point_cam[0,0], point_cam[1,0], 1.0])
             ray_direction = ray_direction / np.linalg.norm(ray_direction)
-            
+
             # Camera position in base_link frame
             cam_pos = np.array([
                 trans.transform.translation.x,
                 trans.transform.translation.y,
                 trans.transform.translation.z
             ])
-            
-            # Ground plane parameters (assuming z=0 is ground)
+
+            # Ground plane parameters (z=0)
             ground_normal = np.array([0, 0, 1])
             ground_point = np.array([0, 0, 0])
-            
-            # Compute intersection with ground plane
+
+            # Intersection with the ground plane
             d = np.dot(ground_point - cam_pos, ground_normal) / np.dot(ray_direction, ground_normal)
             intersection_point = cam_pos + d * ray_direction
-            
-            rospy.logdebug("Projected point: %s", intersection_point)
             return intersection_point.tolist()
-            
         except Exception as e:
-            rospy.logerr("Error in projection: %s", e)
+            rospy.logerr("Error in project_point_to_ground: %s", e)
             return None
 
-    def create_ground_marker(self, point, marker_id, frame_id):
+    def create_ground_bbox_marker(self, corners_3d, marker_id, frame_id):
+        """Creates a LINE_STRIP marker representing a rectangle on the ground plane."""
         marker = Marker()
         marker.header.frame_id = frame_id
         marker.header.stamp = rospy.Time.now()
         marker.ns = "road_markings"
         marker.id = marker_id
-        marker.type = Marker.SPHERE
+        marker.type = Marker.LINE_STRIP
         marker.action = Marker.ADD
-        
-        # Set position
-        marker.pose.position.x = point[0]
-        marker.pose.position.y = point[1]
-        marker.pose.position.z = 0.1  # Slightly above ground to ensure visibility
-        
-        # Set proper quaternion orientation (identity rotation)
-        marker.pose.orientation.x = 0.0
-        marker.pose.orientation.y = 0.0
-        marker.pose.orientation.z = 0.0
-        marker.pose.orientation.w = 1.0
-        
-        # Set marker size
-        marker.scale.x = 0.2
-        marker.scale.y = 0.2
-        marker.scale.z = 0.2
-        
-        # Set marker color (red)
+
+        # Each corner is appended to the marker's points.
+        # The first corner is appended at the end again to close the rectangle.
+        for corner in corners_3d:
+            if corner is not None:
+                p = Point()
+                p.x = corner[0]
+                p.y = corner[1]
+                p.z = corner[2]
+                marker.points.append(p)
+        # Close the loop by repeating the first point if it exists
+        if len(marker.points) > 0:
+            marker.points.append(marker.points[0])
+
+        # Marker scale and color
+        marker.scale.x = 0.05  # line width
         marker.color.r = 1.0
         marker.color.g = 0.0
         marker.color.b = 0.0
         marker.color.a = 1.0
-        
-        # Set marker lifetime
-        marker.lifetime = rospy.Duration(0.5)  # markers disappear after 0.5 seconds
-        
+
+        marker.lifetime = rospy.Duration(0.5)
         return marker
 
     def image_callback(self, msg):
@@ -143,93 +134,93 @@ class RoadMarkingDetector:
 
         try:
             rospy.logdebug("Incoming image encoding: %s", msg.encoding)
-            
-            # Zurück zur ursprünglichen Konvertierung
+
+            # Convert image
             if msg.encoding == '8UC3':
                 cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-                # Convert from BGR to RGB if needed
                 cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
             else:
                 cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-            
+
             rospy.logdebug("Successfully converted image with shape: %s", cv_image.shape)
-            
-            # Run YOLO detection here            
-            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1, device='cuda')            
-            
-            # Erstelle eine Kopie für die Visualisierung und konvertiere zu BGR
+
+            # YOLO detection
+            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1, device='cuda')
+
+            # Visualization image (BGR)
             visualization_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
-            
             marker_array = MarkerArray()
             result = results[0]
             rospy.logdebug("Found %d detections", len(result))
 
-            # Clear previous markers
-            # deletion_marker = Marker()
-            # deletion_marker.header.frame_id = "base_link"
-            # deletion_marker.header.stamp = rospy.Time.now()
-            # deletion_marker.ns = "road_markings"
-            # deletion_marker.action = Marker.DELETEALL
-            # marker_array.markers.append(deletion_marker)
-
-            # Extract boxes from results
+            # Extract bounding boxes
             if hasattr(result, 'boxes') and len(result.boxes) > 0:
                 boxes = result.boxes
                 for i, box in enumerate(boxes):
                     coords = box.xyxy[0].cpu().numpy()
                     bbox = [int(coord) for coord in coords]
-                    
-                    # Debug-Ausgabe für Bounding Box
+
+                    # Debug bounding box
                     rospy.logdebug(f"Processing bbox: {bbox}")
-                    
-                    # Zeichne auf das BGR Bild
-                    cv2.rectangle(visualization_image, 
-                                (bbox[0], bbox[1]), 
-                                (bbox[2], bbox[3]), 
-                                (0, 255, 0), 2)
-                    
-                    # Get class name and confidence
+
+                    # Draw 2D bounding box on visualization image
+                    cv2.rectangle(
+                        visualization_image,
+                        (bbox[0], bbox[1]),
+                        (bbox[2], bbox[3]),
+                        (0, 255, 0),
+                        2
+                    )
+
+                    # Class name and confidence
                     if hasattr(box, 'cls'):
                         class_id = int(box.cls[0])
                         class_name = self.model.names[class_id]
                         conf = float(box.conf[0])
                         label = f"{class_name} {conf:.2f}"
-                        cv2.putText(visualization_image, 
-                                  label,
-                                  (bbox[0], bbox[1] - 10),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 
-                                  0.5, (0, 255, 0), 2)
-                    
-                    ground_point = self.project_to_ground(bbox,
-                                                        cv_image.shape[0],
-                                                        cv_image.shape[1])
-                    
-                    # Debug-Ausgabe für Ground Point
-                    rospy.logdebug(f"Projected ground point: {ground_point}")
-                    
-                    if ground_point is not None:
-                        marker = self.create_ground_marker(ground_point, i+1, 'base_link')  # Changed marker ID to start from 1
-                        if marker is not None:
-                            marker_array.markers.append(marker)
-                            rospy.logdebug(f"Added marker {i+1} at position {ground_point}")
-            
-            # Debug-Ausgabe für MarkerArray
+                        cv2.putText(
+                            visualization_image,
+                            label,
+                            (bbox[0], bbox[1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 0),
+                            2
+                        )
+
+                    # Project all four corners of the bounding box
+                    x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+                    # top-left
+                    tl = self.project_point_to_ground(x1, y1)
+                    # top-right
+                    tr = self.project_point_to_ground(x2, y1)
+                    # bottom-right
+                    br = self.project_point_to_ground(x2, y2)
+                    # bottom-left
+                    bl = self.project_point_to_ground(x1, y2)
+
+                    # Create a ground bounding box marker
+                    corners_3d = [tl, tr, br, bl]
+                    marker = self.create_ground_bbox_marker(corners_3d, i+1, 'base_link')
+                    marker_array.markers.append(marker)
+
+            # Publish markers
             rospy.logdebug(f"Publishing MarkerArray with {len(marker_array.markers)} markers")
             self.marker_pub.publish(marker_array)
 
-            # Publish the visualization image (in BGR format)
+            # Publish visualization image
             try:
                 vis_msg = self.bridge.cv2_to_imgmsg(visualization_image, encoding='bgr8')
                 vis_msg.header = msg.header
                 self.image_pub.publish(vis_msg)
             except Exception as e:
                 rospy.logerr(f"Error publishing visualization image: {e}")
-            
+
         except Exception as e:
             rospy.logerr(f"Error processing image: {e}")
 
+
 def main():
-    # Enable debug logging
     rospy.init_node('road_marking_detector', log_level=rospy.DEBUG)
     rospy.loginfo("Starting Road Marking Detector node")
     RoadMarkingDetector("/home/schoko/projects/ba_rp_detection/rp_detector/yolo_roadpictogram_detection/settings_set_3/train5/weights/epoch50.pt")
