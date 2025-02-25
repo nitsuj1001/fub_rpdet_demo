@@ -44,6 +44,8 @@ class RoadMarkingDetector:
         rospy.Subscriber('sensors/hella/image', Image, self.image_callback)
         rospy.Subscriber('sensors/hella/camera_info', CameraInfo, self.camera_info_callback)
         
+        self.yaw_offset = math.radians(-15) 
+
     def camera_info_callback(self, msg):
         if self.camera_matrix is None:
             self.camera_matrix = np.array(msg.K).reshape(3, 3)
@@ -148,6 +150,13 @@ class RoadMarkingDetector:
                 0.0  # z=0 by definition
             ]
             
+            # Apply yaw rotation
+            c = math.cos(self.yaw_offset)
+            s = math.sin(self.yaw_offset)
+            x_ = intersection[0] * c - intersection[1] * s
+            y_ = intersection[0] * s + intersection[1] * c
+            intersection[0], intersection[1] = x_, y_
+
             rospy.logdebug(f"Intersection point: {intersection}, t={t}")
             return intersection
             
