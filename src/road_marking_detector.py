@@ -50,30 +50,44 @@ class RoadMarkingDetector:
             rospy.logdebug("Camera matrix initialized: \n%s", self.camera_matrix)
             rospy.logdebug("Distortion coefficients: %s", self.dist_coeffs)
 
+    def quaternion_to_rotation_matrix(self, q):
+        """Convert quaternion to rotation matrix."""
+        # Extract quaternion components
+        x, y, z, w = q.x, q.y, q.z, q.w
+        
+        # Calculate rotation matrix elements
+        r00 = 1 - 2*y*y - 2*z*z
+        r01 = 2*x*y - 2*w*z
+        r02 = 2*x*z + 2*w*y
+        
+        r10 = 2*x*y + 2*w*z
+        r11 = 1 - 2*x*x - 2*z*z
+        r12 = 2*y*z - 2*w*x
+        
+        r20 = 2*x*z - 2*w*y
+        r21 = 2*y*z + 2*w*x
+        r22 = 1 - 2*x*x - 2*y*y
+        
+        return np.array([
+            [r00, r01, r02],
+            [r10, r11, r12],
+            [r20, r21, r22]
+        ])
+
     def project_point_to_ground(self, x, y):
         """Projects a single pixel coordinate (x, y) onto the ground plane (z=0)."""
         try:
+            trans = self.tf_buffer.lookup_transform(
+                'base_link',
+                'hella_camera',
+                rospy.Time(0)
+            )
+
             # Homogeneous coordinate
             point_img = np.array([[x], [y], [1.0]])
             
             # Convert to normalized camera coordinates
             point_cam = np.linalg.inv(self.camera_matrix) @ point_img
-
-            # Attempt to get the transform from camera to base_link
-            try:
-                trans = self.tf_buffer.lookup_transform(
-                    'base_link',
-                    'hella_camera',
-                    rospy.Time(0)
-                )
-                rospy.logdebug("Got camera transform: %s", trans)
-            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-                rospy.logerr("TF lookup failed: %s", e)
-                return None
-
-            # Ray direction from camera origin
-            ray_direction = np.array([point_cam[0,0], point_cam[1,0], 1.0])
-            ray_direction = ray_direction / np.linalg.norm(ray_direction)
 
             # Camera position in base_link frame
             cam_pos = np.array([
@@ -82,14 +96,43 @@ class RoadMarkingDetector:
                 trans.transform.translation.z
             ])
 
+            # In camera frame, the ray direction should point forward (+z in camera frame)
+            ray_direction_cam = np.array([point_cam[0,0], point_cam[1,0], 1.0])
+            ray_direction_cam = ray_direction_cam / np.linalg.norm(ray_direction_cam)
+            
+            # Get rotation matrix
+            rotation_matrix = self.quaternion_to_rotation_matrix(trans.transform.rotation)
+            
+            # Transform ray direction to base_link frame
+            # Note: We need to invert the rotation because we're going from camera to base_link
+            ray_direction = rotation_matrix.T @ ray_direction_cam
+
             # Ground plane parameters (z=0)
             ground_normal = np.array([0, 0, 1])
             ground_point = np.array([0, 0, 0])
 
-            # Intersection with the ground plane
-            d = np.dot(ground_point - cam_pos, ground_normal) / np.dot(ray_direction, ground_normal)
+            # Calculate intersection with ground plane
+            denominator = np.dot(ray_direction, ground_normal)
+            if abs(denominator) < 1e-6:
+                rospy.logwarn("Ray is parallel to ground plane")
+                return None
+
+            d = -np.dot(cam_pos, ground_normal) / denominator
+            
+            if d < 0:
+                rospy.logwarn("Ray points away from ground plane")
+                return None
+
             intersection_point = cam_pos + d * ray_direction
+
+            # Debug output
+            rospy.logdebug(f"Camera position: {cam_pos}")
+            rospy.logdebug(f"Ray direction (camera frame): {ray_direction_cam}")
+            rospy.logdebug(f"Ray direction (base frame): {ray_direction}")
+            rospy.logdebug(f"Intersection point: {intersection_point}")
+            
             return intersection_point.tolist()
+
         except Exception as e:
             rospy.logerr("Error in project_point_to_ground: %s", e)
             return None
