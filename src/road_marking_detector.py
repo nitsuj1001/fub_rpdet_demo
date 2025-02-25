@@ -112,7 +112,7 @@ class RoadMarkingDetector:
         # Set position
         marker.pose.position.x = point[0]
         marker.pose.position.y = point[1]
-        marker.pose.position.z = 0.0
+        marker.pose.position.z = 0.1  # Slightly above ground to ensure visibility
         
         # Set proper quaternion orientation (identity rotation)
         marker.pose.orientation.x = 0.0
@@ -155,22 +155,22 @@ class RoadMarkingDetector:
             rospy.logdebug("Successfully converted image with shape: %s", cv_image.shape)
             
             # Run YOLO detection here            
-            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1)
-            rospy.logdebug("Found %d detections", len(results))
+            results = self.model.predict(source=cv_image, imgsz=640, conf=0.1, device='cuda')            
             
             # Erstelle eine Kopie für die Visualisierung und konvertiere zu BGR
             visualization_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
             
             marker_array = MarkerArray()
             result = results[0]
+            rospy.logdebug("Found %d detections", len(result))
 
             # Clear previous markers
-            deletion_marker = Marker()
-            deletion_marker.header.frame_id = "base_link"
-            deletion_marker.header.stamp = rospy.Time.now()
-            deletion_marker.ns = "road_markings"
-            deletion_marker.action = Marker.DELETEALL
-            marker_array.markers.append(deletion_marker)
+            # deletion_marker = Marker()
+            # deletion_marker.header.frame_id = "base_link"
+            # deletion_marker.header.stamp = rospy.Time.now()
+            # deletion_marker.ns = "road_markings"
+            # deletion_marker.action = Marker.DELETEALL
+            # marker_array.markers.append(deletion_marker)
 
             # Extract boxes from results
             if hasattr(result, 'boxes') and len(result.boxes) > 0:
@@ -178,6 +178,9 @@ class RoadMarkingDetector:
                 for i, box in enumerate(boxes):
                     coords = box.xyxy[0].cpu().numpy()
                     bbox = [int(coord) for coord in coords]
+                    
+                    # Debug-Ausgabe für Bounding Box
+                    rospy.logdebug(f"Processing bbox: {bbox}")
                     
                     # Zeichne auf das BGR Bild
                     cv2.rectangle(visualization_image, 
@@ -197,11 +200,19 @@ class RoadMarkingDetector:
                                                         cv_image.shape[0],
                                                         cv_image.shape[1])
                     
+                    # Debug-Ausgabe für Ground Point
+                    rospy.logdebug(f"Projected ground point: {ground_point}")
+                    
                     if ground_point is not None:
-                        marker = self.create_ground_marker(ground_point, i, 'base_link')
+                        marker = self.create_ground_marker(ground_point, i+1, 'base_link')  # Changed marker ID to start from 1
                         if marker is not None:
                             marker_array.markers.append(marker)
+                            rospy.logdebug(f"Added marker {i+1} at position {ground_point}")
             
+            # Debug-Ausgabe für MarkerArray
+            rospy.logdebug(f"Publishing MarkerArray with {len(marker_array.markers)} markers")
+            self.marker_pub.publish(marker_array)
+
             # Publish the visualization image (in BGR format)
             try:
                 vis_msg = self.bridge.cv2_to_imgmsg(visualization_image, encoding='bgr8')
@@ -209,8 +220,6 @@ class RoadMarkingDetector:
                 self.image_pub.publish(vis_msg)
             except Exception as e:
                 rospy.logerr(f"Error publishing visualization image: {e}")
-            
-            self.marker_pub.publish(marker_array)
             
         except Exception as e:
             rospy.logerr(f"Error processing image: {e}")
